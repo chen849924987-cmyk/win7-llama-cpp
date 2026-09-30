@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
+<title>Local LLM Chat (fallback client)</title>
+<style>
+body{font-family:Consolas,"Microsoft YaHei",monospace;max-width:860px;margin:20px auto;padding:0 10px;background:#1e1e1e;color:#d4d4d4}
+h3{color:#9cdcfe}
+#log{border:1px solid #444;background:#252526;height:55vh;overflow-y:auto;padding:10px;margin-bottom:8px}
+.u{color:#9cdcfe;margin:8px 0 2px 0;white-space:pre-wrap}
+.a{color:#ce9178;margin:2px 0 8px 0;white-space:pre-wrap}
+.e{color:#f48771}
+textarea{width:100%;height:70px;background:#333;color:#eee;border:1px solid #555;font-family:inherit;font-size:14px}
+input[type=text]{width:340px;background:#333;color:#eee;border:1px solid #555;font-family:inherit}
+button{background:#0e639c;color:#fff;border:none;padding:6px 18px;font-size:14px;cursor:pointer}
+button:disabled{background:#444;color:#888}
+label{font-size:12px;color:#888}
+</style>
+</head>
+<body>
+<h3>Local LLM Chat — zero-dependency fallback client</h3>
+<div>
+<label>API endpoint</label><br>
+<input type="text" id="ep" value="http://127.0.0.1:8080/v1/chat/completions">
+<label>&nbsp;&nbsp;model name (cosmetic)</label>
+<input type="text" id="mn" value="qwen2.5-coder-7b" style="width:200px">
+</div>
+<div id="log"></div>
+<textarea id="q" placeholder="Type your message here, Ctrl+Enter to send..."></textarea>
+<p><button id="send" onclick="doSend()">Send (Ctrl+Enter)</button> <button onclick="clearLog()" style="background:#555">Clear</button>
+<span id="st"></span></p>
+<script>
+var hist=[];
+function el(id){return document.getElementById(id);}
+function addLog(cls,txt){var d=document.createElement('div');d.className=cls;d.appendChild(document.createTextNode(txt));el('log').appendChild(d);el('log').scrollTop=el('log').scrollHeight;}
+function clearLog(){el('log').innerHTML='';hist=[];}
+function setBusy(b){el('send').disabled=b;el('st').innerHTML=b?' &nbsp;thinking...':'';}
+function doSend(){
+  var t=el('q').value.replace(/\s+$/,'');
+  if(!t)return;
+  if(hist.length>16){hist=hist.slice(-16);}
+  hist.push({role:'user',content:t});
+  addLog('u','You: '+t);
+  el('q').value='';
+  setBusy(true);
+  var xhr=new XMLHttpRequest();
+  xhr.open('POST',el('ep').value,true);
+  xhr.setRequestHeader('Content-Type','application/json');
+  xhr.onreadystatechange=function(){
+    if(xhr.readyState===4){
+      setBusy(false);
+      var txt='';
+      if(xhr.status===200){
+        try{txt=JSON.parse(xhr.responseText).choices[0].message.content;}
+        catch(e){txt='[bad response] '+xhr.responseText.substring(0,400);}
+        hist.push({role:'assistant',content:txt});
+        addLog('a','AI: '+txt);
+      }else{
+        addLog('e','[HTTP '+xhr.status+'] '+xhr.responseText.substring(0,400));
+      }
+    }
+  };
+  var body=JSON.stringify({model:el('mn').value,messages:hist.concat([{role:'user',content:t}]),stream:false,temperature:0.3,max_tokens:2048});
+  try{xhr.send(body);}catch(e){setBusy(false);addLog('e','[send failed] '+e.message+' — if this is a CORS/file:// block, use the built-in WebUI at http://127.0.0.1:8080 instead.');}
+}
+document.getElementById('q').addEventListener('keydown',function(ev){
+  if(ev.ctrlKey&&(ev.keyCode===13)){ev.preventDefault();doSend();}
+});
+addLog('a','Ready. Make sure llama-server is running (start-llm-*.bat), then send a message.');
+</script>
+</body>
+</html>
