@@ -1,0 +1,16 @@
+# Build outputs
+build-cuda/
+build-cpu/
+*.obj
+*.exe
+*.dll
+*.lib
+*.pdb
+
+# Unpacked upstream source (keep the repo to our own files)
+llama.cpp-*/
+llama.cpp-v*.zip
+
+# Logs & temp
+*.log
+tmp/
