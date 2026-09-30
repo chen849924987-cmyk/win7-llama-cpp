@@ -1,0 +1,70 @@
+--- a/vendor/cpp-httplib/httplib.cpp
++++ b/vendor/cpp-httplib/httplib.cpp
+@@ -1588,9 +1588,11 @@
+   auto wpath = u8string_to_wstring(path);
+   if (wpath.empty()) { return false; }
+ 
++  // Win7 compat patch: CreateFile2 is Win8+; use CreateFileW (behavior identical here)
+   hFile_ =
+-      ::CreateFile2(wpath.c_str(), GENERIC_READ,
+-                    FILE_SHARE_READ | FILE_SHARE_WRITE, OPEN_EXISTING, NULL);
++      ::CreateFileW(wpath.c_str(), GENERIC_READ,
++                    FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING,
++                    FILE_ATTRIBUTE_NORMAL, NULL);
+ 
+   if (hFile_ == INVALID_HANDLE_VALUE) { return false; }
+ 
+@@ -1606,8 +1608,10 @@
+   }
+   size_ = static_cast<size_t>(size.QuadPart);
+ 
++  // Win7 compat patch: CreateFileMappingFromApp is Win8+;
++  // CreateFileMappingW with max size 0,0 maps the whole file (read-only full view)
+   hMapping_ =
+-      ::CreateFileMappingFromApp(hFile_, NULL, PAGE_READONLY, size_, NULL);
++      ::CreateFileMappingW(hFile_, NULL, PAGE_READONLY, 0, 0, NULL);
+ 
+   // Special treatment for an empty file...
+   if (hMapping_ == NULL && size_ == 0) {
+@@ -1621,7 +1625,8 @@
+     return false;
+   }
+ 
+-  addr_ = ::MapViewOfFileFromApp(hMapping_, FILE_MAP_READ, 0, 0);
++  // Win7 compat patch: MapViewOfFileFromApp is Win8+; MapViewOfFile with size 0 maps whole section
++  addr_ = ::MapViewOfFile(hMapping_, FILE_MAP_READ, 0, 0, 0);
+ 
+   if (addr_ == nullptr) {
+     close();
+--- a/vendor/cpp-httplib/httplib.h
++++ b/vendor/cpp-httplib/httplib.h
+@@ -12,7 +12,10 @@
+ #define CPPHTTPLIB_VERSION_NUM "0x003901"
+ 
+ #ifdef _WIN32
+-#if defined(_WIN32_WINNT) && _WIN32_WINNT < 0x0A00
++// Win7 compat patch: upstream rejects _WIN32_WINNT < 0x0A00, but this build
++// replaces the Win8+ APIs (CreateFile2 / *FromApp) with Win7-compatible ones
++// (see httplib.cpp), so older targets are intentionally allowed here.
++#if 0 && defined(_WIN32_WINNT) && _WIN32_WINNT < 0x0A00
+ #error                                                                         \
+     "cpp-httplib doesn't support Windows 8 or lower. Please use Windows 10 or later."
+ #endif
+--- a/ggml/src/ggml-cpu/ggml-cpu.c
++++ b/ggml/src/ggml-cpu/ggml-cpu.c
+@@ -2586,7 +2586,14 @@
+         t.ControlMask = THREAD_POWER_THROTTLING_EXECUTION_SPEED;
+         t.StateMask   = 0;
+ 
+-        if (!SetThreadInformation(GetCurrentThread(), ThreadPowerThrottling, &t, sizeof(t))) {
++        // Win7 compat patch: SetThreadInformation is Win8+; resolve dynamically so
++        // the loader does not require the export at process start.
++        typedef BOOL (WINAPI *pfn_set_thread_information_t)(HANDLE, THREAD_INFORMATION_CLASS, LPVOID, DWORD);
++        static pfn_set_thread_information_t pfn_set_thread_information;
++        if (!pfn_set_thread_information) {
++            pfn_set_thread_information = (pfn_set_thread_information_t)(void *) GetProcAddress(GetModuleHandleW(L"kernel32.dll"), "SetThreadInformation");
++        }
++        if (!pfn_set_thread_information || !pfn_set_thread_information(GetCurrentThread(), ThreadPowerThrottling, &t, sizeof(t))) {
+             GGML_LOG_DEBUG("failed to disable thread power throttling %d : (%d)\n", prio, (int) GetLastError());
+             return false;
+         }
